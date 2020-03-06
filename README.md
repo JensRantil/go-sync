@@ -1,3 +1,5 @@
+[![Build Status](https://secure.travis-ci.org/JensRantil/go-sync.png?branch=master)](http://travis-ci.org/JensRantil/go-sync) [![Go Report Card](https://goreportcard.com/badge/github.com/JensRantil/go-sync)](https://goreportcard.com/report/github.com/JensRantil/go-sync) [![GoDoc](https://godoc.org/github.com/JensRantil/go-sync?status.svg)](https://godoc.org/github.com/JensRantil/go-sync)
+
 `sync` with Context
 ===================
 This is a small Golang library that tries to mimic (unless otherwise stated in
