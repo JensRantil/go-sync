@@ -77,7 +77,8 @@ func (c *Cond) Wait() {
 	c.WaitWithContext(context.TODO())
 }
 
-// WaitWithContext behaves similar as Wait, but also supports deadline. It returns context.Err().
+// WaitWithContext behaves similar as Wait, but also supports deadline. It
+// returns context.Err().
 func (c *Cond) WaitWithContext(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		// No reason to continue if we've already timed out.
@@ -86,7 +87,8 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 
 	var id uint64
 	for {
-		// Using a a for-loop in the extremelly theoretically rare case when we have a wait that has been around for a really long time.
+		// Using a a for-loop in the extremely theoretically rare case when we
+		// have a wait that has been around for a really long time.
 
 		c.nextID++
 		id = c.nextID
