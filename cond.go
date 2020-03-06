@@ -87,7 +87,7 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 
 	var id uint64
 	for {
-		// Using a a for-loop in the extremelly theoretically rare case when we
+		// Using a a for-loop in the extremely theoretically rare case when we
 		// have a wait that has been around for a really long time.
 
 		c.nextID++
