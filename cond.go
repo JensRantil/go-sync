@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-// WaitCond behaves similarly to sync.Cond, but also supports context.Context.
+// Cond behaves similarly to sync.Cond, but also supports context.Context.
 // It has slight nuance in behaviour for Broadcast and Signal methods.
 type Cond struct {
 	noCopy noCopy
@@ -15,7 +15,7 @@ type Cond struct {
 	L            sync.Locker
 }
 
-// NewWaitCond returns a WaitCond.
+// NewCond returns a WaitCond.
 func NewCond(l sync.Locker) *Cond {
 	return &Cond{
 		noCopy{},
