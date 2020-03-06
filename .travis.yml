@@ -1,5 +1,12 @@
 language: go
 
+branches:
+  except:
+    # This is where pull requests from "bors r+" are baked.
+    - staging.tmp
+    # This is where pull requests from "bors try" are baked.
+    - trying.tmp
+
 go:
   - "1.14"
   - tip
