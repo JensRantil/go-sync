@@ -27,4 +27,4 @@ That is the `sync.Mutex` in standard library is about 77% faster than this mutex
 
 Credits
 =======
-Initial development was sponsored by [Tink](http://github.com/tink-ab)
+Initial development was sponsored by [Tink](http://github.com/tink-ab).
