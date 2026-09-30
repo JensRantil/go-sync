@@ -25,6 +25,15 @@ ok  	github.com/JensRantil/sync-with-context	4.665s
 ```
 That is the `sync.Mutex` in standard library is about 77% faster than this mutex.
 
+Benchmarking
+============
+If you are making changes to anything that could impact performance, please include the `benchstat` output in the pull request:
+
+1. `go test -run='^$' -bench=. -count=10 > old.txt`
+2. Make your change.
+3. `go test -run='^$' -bench=. -count=10 > new.txt`
+4. `go tool benchstat old.txt new.txt´
+
 Credits
 =======
 Initial development was sponsored by [Tink](http://github.com/tink-ab).

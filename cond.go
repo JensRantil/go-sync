@@ -65,16 +65,36 @@ func (c *Cond) Signal() {
 // cannot assume that the condition is true when Wait returns. Instead, the
 // caller should Wait in a loop:
 //
-//    c.L.Lock()
-//    for !condition() {
-//        c.Wait()
-//    }
-//    ... make use of condition ...
-//    c.L.Unlock()
-//
+//	c.L.Lock()
+//	for !condition() {
+//	    c.Wait()
+//	}
+//	... make use of condition ...
+//	c.L.Unlock()
 func (c *Cond) Wait() {
-	// Implement this without a context.
-	c.WaitWithContext(context.TODO())
+	var id uint64
+	for {
+		// Using a a for-loop in the extremely theoretically rare case when we
+		// have a wait that has been around for a really long time such that
+		// c.nextID has wrapped around.
+
+		c.nextID++
+		id = c.nextID
+		if _, exist := c.channelWaits[id]; !exist {
+			break
+		}
+	}
+
+	ch := make(chan struct{}, 1)
+	c.channelWaits[id] = ch
+
+	c.L.Unlock()
+	defer c.L.Lock()
+
+	select {
+	case <-ch:
+		return
+	}
 }
 
 // WaitWithContext behaves similar as Wait, but also supports deadline. It
@@ -88,7 +108,8 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 	var id uint64
 	for {
 		// Using a a for-loop in the extremely theoretically rare case when we
-		// have a wait that has been around for a really long time.
+		// have a wait that has been around for a really long time such that
+		// c.nextID has wrapped around.
 
 		c.nextID++
 		id = c.nextID
