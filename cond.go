@@ -75,7 +75,8 @@ func (c *Cond) Wait() {
 	var id uint64
 	for {
 		// Using a a for-loop in the extremely theoretically rare case when we
-		// have a wait that has been around for a really long time.
+		// have a wait that has been around for a really long time such that
+		// c.nextID has wrapped around.
 
 		c.nextID++
 		id = c.nextID
@@ -107,7 +108,8 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 	var id uint64
 	for {
 		// Using a a for-loop in the extremely theoretically rare case when we
-		// have a wait that has been around for a really long time.
+		// have a wait that has been around for a really long time such that
+		// c.nextID has wrapped around.
 
 		c.nextID++
 		id = c.nextID
