@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 )
 
 // Cond behaves similarly to sync.Cond, but also supports context.Context.
@@ -10,7 +11,7 @@ import (
 type Cond struct {
 	noCopy noCopy
 
-	nextID       uint64
+	nextID       atomic.Uint64
 	channelWaits map[uint64]chan struct{}
 	L            sync.Locker
 }
@@ -18,10 +19,8 @@ type Cond struct {
 // NewCond returns a WaitCond.
 func NewCond(l sync.Locker) *Cond {
 	return &Cond{
-		noCopy{},
-		0,
-		make(map[uint64]chan struct{}),
-		l,
+		channelWaits: make(map[uint64]chan struct{}),
+		L:            l,
 	}
 }
 
@@ -78,8 +77,7 @@ func (c *Cond) Wait() {
 		// have a wait that has been around for a really long time such that
 		// c.nextID has wrapped around.
 
-		c.nextID++
-		id = c.nextID
+		id = c.nextID.Add(1)
 		if _, exist := c.channelWaits[id]; !exist {
 			break
 		}
@@ -111,8 +109,7 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 		// have a wait that has been around for a really long time such that
 		// c.nextID has wrapped around.
 
-		c.nextID++
-		id = c.nextID
+		id = c.nextID.Add(1)
 		if _, exist := c.channelWaits[id]; !exist {
 			break
 		}
