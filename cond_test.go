@@ -191,3 +191,63 @@ func TestCondBroadcast(t *testing.T) {
 
 	wg.Wait()
 }
+
+// Tests that sync.Cond works with mu.RLocker():
+//  1. Wait releases the read lock, so a writer can take mu.Lock() while
+//     all waiters are waiting.
+//  2. After Broadcast, all waiters wake up and hold the read lock
+//     SIMULTANEOUSLY (the barrier below can only be passed if all n of them
+//     hold RLock at the same time).
+//
+// If the Cond had been created with &mu (exclusive lock), the waiters would be
+// serialized, the barrier would never be passed, and the test would hang until
+// `go test -timeout` kicks in. Run it with e.g.: go test -race -timeout 10s
+func TestCondWithRLocker(t *testing.T) {
+	const n = 5
+
+	var (
+		mu    sync.RWMutex
+		ready bool
+	)
+	cond := NewCond(mu.RLocker())
+
+	var (
+		started sync.WaitGroup // waiters hold the read lock and are about to call Wait
+		barrier sync.WaitGroup // all n waiters must be inside the read section at once
+		done    sync.WaitGroup
+	)
+	started.Add(n)
+	barrier.Add(n)
+	done.Add(n)
+
+	for i := 0; i < n; i++ {
+		go func() {
+			defer done.Done()
+
+			cond.L.Lock() // = mu.RLock()
+			started.Done()
+			for !ready {
+				cond.Wait() // releases the RLock while waiting
+			}
+
+			// We hold the read lock here. Wait until all n waiters do so at once.
+			barrier.Done()
+			barrier.Wait()
+
+			cond.L.Unlock() // = mu.RUnlock()
+		}()
+	}
+
+	started.Wait()
+
+	// The writer can only get mu.Lock() if all waiters have released their
+	// read locks inside Wait. Otherwise this line blocks forever.
+	mu.Lock()
+	ready = true
+	mu.Unlock()
+	cond.Broadcast()
+
+	// Only passes if all waiters woke up and held the read lock concurrently.
+	// Otherwise the test hangs until `go test -timeout` fires.
+	done.Wait()
+}
