@@ -75,7 +75,7 @@ func (c *Cond) Wait() {
 		}
 	}
 
-	ch := make(chan struct{}, 1)
+	ch := chanStructPool.Get()
 	c.channelWaits.Set(id, ch)
 
 	c.L.Unlock()
@@ -83,7 +83,7 @@ func (c *Cond) Wait() {
 
 	select {
 	case <-ch:
-		// TODO: Put the channel in a pool to reduce allocations.
+		chanStructPool.Put(ch)
 		return
 	}
 }
@@ -108,8 +108,7 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 		}
 	}
 
-	// TODO: Pull `ch` from a pool if available to reduce allocations. Only instantiate if the pool is empty.
-	ch := make(chan struct{}, 1)
+	ch := chanStructPool.Get()
 	c.channelWaits.Set(id, ch)
 
 	c.L.Unlock()
@@ -120,15 +119,17 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 	// this, we make the behaviour for this method deterministic if calling it
 	// with a cancelled context.
 	case <-ch:
-		// TODO: Put the channel in a pool to reduce allocations.
+		chanStructPool.Put(ch)
 		return nil
 	default:
 	}
 
 	select {
 	case <-ch:
-		// TODO: Put the channel in a pool to reduce allocations.
+		chanStructPool.Put(ch)
 	case <-ctx.Done():
+		// ch stays registered. A later Signal or Broadcast may still send on
+		// it, so it cannot go back to the pool.
 		return ctx.Err()
 	}
 
@@ -147,6 +148,7 @@ var chanStructPool = chanPool{
 }
 
 // chanPool is a sync.Pool whose elements are chan struct{}.
+// It is safe for concurrent use by multiple goroutines because it is backed by sync.Pool.
 type chanPool struct {
 	p sync.Pool
 }
