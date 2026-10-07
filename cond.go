@@ -136,3 +136,25 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 	// the context has become Done _after_ we managed to lock.
 	return nil
 }
+
+// chanStructPool is a typed sync.Pool of one-buffered chan struct{} values.
+var chanStructPool = chanPool{
+	p: sync.Pool{
+		New: func() any {
+			return make(chan struct{}, 1)
+		},
+	},
+}
+
+// chanPool is a sync.Pool whose elements are chan struct{}.
+type chanPool struct {
+	p sync.Pool
+}
+
+func (p *chanPool) Get() chan struct{} {
+	return p.p.Get().(chan struct{})
+}
+
+func (p *chanPool) Put(ch chan struct{}) {
+	p.p.Put(ch)
+}
