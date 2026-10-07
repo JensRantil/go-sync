@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 )
 
 // Cond behaves similarly to sync.Cond, but also supports context.Context.
@@ -10,18 +11,15 @@ import (
 type Cond struct {
 	noCopy noCopy
 
-	nextID       uint64
-	channelWaits map[uint64]chan struct{}
+	nextID       atomic.Uint64
+	channelWaits uint64Channels
 	L            sync.Locker
 }
 
 // NewCond returns a WaitCond.
 func NewCond(l sync.Locker) *Cond {
 	return &Cond{
-		noCopy{},
-		0,
-		make(map[uint64]chan struct{}),
-		l,
+		L: l,
 	}
 }
 
@@ -29,32 +27,29 @@ func NewCond(l sync.Locker) *Cond {
 //
 // Compared to sync.Cond.Broadcast, a lock _must_ be held when calling this.
 func (c *Cond) Broadcast() {
-	var todelete []uint64
-	for k, c := range c.channelWaits {
+	c.channelWaits.Iterate(func(k uint64, ch chan struct{}) bool {
 		select {
-		case c <- struct{}{}:
-			todelete = append(todelete, k)
+		case ch <- struct{}{}:
+			c.channelWaits.Delete(k)
 		default:
 		}
-	}
-
-	for _, k := range todelete {
-		delete(c.channelWaits, k)
-	}
+		return true
+	})
 }
 
 // Signal wakes one goroutine waiting on c, if there is any.
 //
 // Compared to sync.Cond.Signal, a lock _must_ be held when calling this.
 func (c *Cond) Signal() {
-	for k, ch := range c.channelWaits {
+	c.channelWaits.Iterate(func(k uint64, ch chan struct{}) bool {
 		select {
 		case ch <- struct{}{}:
-			delete(c.channelWaits, k)
-			return
+			c.channelWaits.Delete(k)
+			return false
 		default:
+			return true
 		}
-	}
+	})
 }
 
 // Wait atomically unlocks c.L and suspends execution of the calling goroutine.
@@ -78,15 +73,14 @@ func (c *Cond) Wait() {
 		// have a wait that has been around for a really long time such that
 		// c.nextID has wrapped around.
 
-		c.nextID++
-		id = c.nextID
-		if _, exist := c.channelWaits[id]; !exist {
+		id = c.nextID.Add(1)
+		if _, exist := c.channelWaits.Get(id); !exist {
 			break
 		}
 	}
 
 	ch := make(chan struct{}, 1)
-	c.channelWaits[id] = ch
+	c.channelWaits.Set(id, ch)
 
 	c.L.Unlock()
 	defer c.L.Lock()
@@ -111,15 +105,14 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 		// have a wait that has been around for a really long time such that
 		// c.nextID has wrapped around.
 
-		c.nextID++
-		id = c.nextID
-		if _, exist := c.channelWaits[id]; !exist {
+		id = c.nextID.Add(1)
+		if _, exist := c.channelWaits.Get(id); !exist {
 			break
 		}
 	}
 
 	ch := make(chan struct{}, 1)
-	c.channelWaits[id] = ch
+	c.channelWaits.Set(id, ch)
 
 	c.L.Unlock()
 	defer c.L.Lock()
