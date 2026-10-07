@@ -83,6 +83,7 @@ func (c *Cond) Wait() {
 
 	select {
 	case <-ch:
+		// TODO: Put the channel in a pool to reduce allocations.
 		return
 	}
 }
@@ -107,6 +108,7 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 		}
 	}
 
+	// TODO: Pull `ch` from a pool if available to reduce allocations. Only instantiate if the pool is empty.
 	ch := make(chan struct{}, 1)
 	c.channelWaits.Set(id, ch)
 
@@ -118,12 +120,14 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 	// this, we make the behaviour for this method deterministic if calling it
 	// with a cancelled context.
 	case <-ch:
+		// TODO: Put the channel in a pool to reduce allocations.
 		return nil
 	default:
 	}
 
 	select {
 	case <-ch:
+		// TODO: Put the channel in a pool to reduce allocations.
 	case <-ctx.Done():
 		return ctx.Err()
 	}
