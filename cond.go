@@ -24,8 +24,6 @@ func NewCond(l sync.Locker) *Cond {
 }
 
 // Broadcast wakes all goroutines waiting on c.
-//
-// Compared to sync.Cond.Broadcast, a lock _must_ be held when calling this.
 func (c *Cond) Broadcast() {
 	c.channelWaits.Iterate(func(k uint64, ch chan struct{}) bool {
 		select {
@@ -38,8 +36,6 @@ func (c *Cond) Broadcast() {
 }
 
 // Signal wakes one goroutine waiting on c, if there is any.
-//
-// Compared to sync.Cond.Signal, a lock _must_ be held when calling this.
 func (c *Cond) Signal() {
 	c.channelWaits.Iterate(func(k uint64, ch chan struct{}) bool {
 		select {
