@@ -75,7 +75,7 @@ func (c *Cond) Wait() {
 		}
 	}
 
-	ch := make(chan struct{}, 1)
+	ch := chanStructPool.Get()
 	c.channelWaits.Set(id, ch)
 
 	c.L.Unlock()
@@ -83,6 +83,7 @@ func (c *Cond) Wait() {
 
 	select {
 	case <-ch:
+		chanStructPool.Put(ch)
 		return
 	}
 }
@@ -107,7 +108,7 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 		}
 	}
 
-	ch := make(chan struct{}, 1)
+	ch := chanStructPool.Get()
 	c.channelWaits.Set(id, ch)
 
 	c.L.Unlock()
@@ -118,17 +119,44 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 	// this, we make the behaviour for this method deterministic if calling it
 	// with a cancelled context.
 	case <-ch:
+		chanStructPool.Put(ch)
 		return nil
 	default:
 	}
 
 	select {
 	case <-ch:
+		chanStructPool.Put(ch)
 	case <-ctx.Done():
+		// ch stays registered. A later Signal or Broadcast may still send on
+		// it, so it cannot go back to the pool.
 		return ctx.Err()
 	}
 
 	// Not returning ctx.Err() here because there's a small race condition that
 	// the context has become Done _after_ we managed to lock.
 	return nil
+}
+
+// chanStructPool is a typed sync.Pool of one-buffered chan struct{} values.
+var chanStructPool = chanPool{
+	p: sync.Pool{
+		New: func() any {
+			return make(chan struct{}, 1)
+		},
+	},
+}
+
+// chanPool is a sync.Pool whose elements are chan struct{}.
+// It is safe for concurrent use by multiple goroutines because it is backed by sync.Pool.
+type chanPool struct {
+	p sync.Pool
+}
+
+func (p *chanPool) Get() chan struct{} {
+	return p.p.Get().(chan struct{})
+}
+
+func (p *chanPool) Put(ch chan struct{}) {
+	p.p.Put(ch)
 }
