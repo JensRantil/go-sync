@@ -3,7 +3,6 @@ package sync
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 )
 
 // Cond behaves similarly to sync.Cond, but also supports context.Context.
@@ -11,9 +10,13 @@ import (
 type Cond struct {
 	noCopy noCopy
 
-	nextID       atomic.Uint64
-	channelWaits uint64Channels
-	L            sync.Locker
+	L sync.Locker
+
+	// mu protects head and tail. Broadcast and Signal drop it before
+	// sending, so waking waiters does not run under the lock.
+	mu   sync.Mutex
+	head *waiter
+	tail *waiter
 }
 
 // NewCond returns a WaitCond.
@@ -25,27 +28,21 @@ func NewCond(l sync.Locker) *Cond {
 
 // Broadcast wakes all goroutines waiting on c.
 func (c *Cond) Broadcast() {
-	c.channelWaits.Iterate(func(k uint64, ch chan struct{}) bool {
-		select {
-		case ch <- struct{}{}:
-			c.channelWaits.Delete(k)
-		default:
-		}
-		return true
-	})
+	for w := c.detachWaiters(); w != nil; {
+		next := w.next
+		w.next = nil
+		w.ch <- struct{}{}
+		w = next
+	}
 }
 
 // Signal wakes one goroutine waiting on c, if there is any.
 func (c *Cond) Signal() {
-	c.channelWaits.Iterate(func(k uint64, ch chan struct{}) bool {
-		select {
-		case ch <- struct{}{}:
-			c.channelWaits.Delete(k)
-			return false
-		default:
-			return true
-		}
-	})
+	w := c.popWaiter()
+	if w == nil {
+		return
+	}
+	w.ch <- struct{}{}
 }
 
 // Wait atomically unlocks c.L and suspends execution of the calling goroutine.
@@ -63,29 +60,13 @@ func (c *Cond) Signal() {
 //	... make use of condition ...
 //	c.L.Unlock()
 func (c *Cond) Wait() {
-	var id uint64
-	for {
-		// Using a a for-loop in the extremely theoretically rare case when we
-		// have a wait that has been around for a really long time such that
-		// c.nextID has wrapped around.
-
-		id = c.nextID.Add(1)
-		if _, exist := c.channelWaits.Get(id); !exist {
-			break
-		}
-	}
-
-	ch := chanStructPool.Get()
-	c.channelWaits.Set(id, ch)
+	w := c.queueWaiter()
 
 	c.L.Unlock()
 	defer c.L.Lock()
 
-	select {
-	case <-ch:
-		chanStructPool.Put(ch)
-		return
-	}
+	<-w.ch
+	waiterNodePool.Put(w)
 }
 
 // WaitWithContext behaves similar as Wait, but also supports deadline. It
@@ -96,20 +77,7 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 		return err
 	}
 
-	var id uint64
-	for {
-		// Using a a for-loop in the extremely theoretically rare case when we
-		// have a wait that has been around for a really long time such that
-		// c.nextID has wrapped around.
-
-		id = c.nextID.Add(1)
-		if _, exist := c.channelWaits.Get(id); !exist {
-			break
-		}
-	}
-
-	ch := chanStructPool.Get()
-	c.channelWaits.Set(id, ch)
+	w := c.queueWaiter()
 
 	c.L.Unlock()
 	defer c.L.Lock()
@@ -118,18 +86,18 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 	// Always trying to wake up before checking if the context is Done. By doing
 	// this, we make the behaviour for this method deterministic if calling it
 	// with a cancelled context.
-	case <-ch:
-		chanStructPool.Put(ch)
+	case <-w.ch:
+		waiterNodePool.Put(w)
 		return nil
 	default:
 	}
 
 	select {
-	case <-ch:
-		chanStructPool.Put(ch)
+	case <-w.ch:
+		waiterNodePool.Put(w)
 	case <-ctx.Done():
-		// ch stays registered. A later Signal or Broadcast may still send on
-		// it, so it cannot go back to the pool.
+		// w stays queued. A later Signal or Broadcast may still send on it,
+		// so it cannot go back to the pool.
 		return ctx.Err()
 	}
 
@@ -138,25 +106,75 @@ func (c *Cond) WaitWithContext(ctx context.Context) error {
 	return nil
 }
 
-// chanStructPool is a typed sync.Pool of one-buffered chan struct{} values.
-var chanStructPool = chanPool{
+func (c *Cond) queueWaiter() *waiter {
+	w := waiterNodePool.Get()
+	c.mu.Lock()
+	if c.tail != nil {
+		c.tail.next = w
+	} else {
+		c.head = w
+	}
+	c.tail = w
+	c.mu.Unlock()
+	return w
+}
+
+func (c *Cond) popWaiter() *waiter {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	w := c.head
+	if w == nil {
+		return nil
+	}
+	c.head = w.next
+	if c.head == nil {
+		c.tail = nil
+	}
+	w.next = nil
+	return w
+}
+
+func (c *Cond) detachWaiters() *waiter {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	w := c.head
+	c.head = nil
+	c.tail = nil
+	return w
+}
+
+// waiter is one goroutine blocked in Wait or WaitWithContext.
+type waiter struct {
+	ch   chan struct{}
+	next *waiter
+}
+
+// waiterNodePool is a typed sync.Pool of waiter nodes, each with a
+// one-buffered channel.
+var waiterNodePool = waiterPool{
 	p: sync.Pool{
 		New: func() any {
-			return make(chan struct{}, 1)
+			return &waiter{ch: make(chan struct{}, 1)}
 		},
 	},
 }
 
-// chanPool is a sync.Pool whose elements are chan struct{}.
+// waiterPool is a sync.Pool whose elements are *waiter.
 // It is safe for concurrent use by multiple goroutines because it is backed by sync.Pool.
-type chanPool struct {
+type waiterPool struct {
 	p sync.Pool
 }
 
-func (p *chanPool) Get() chan struct{} {
-	return p.p.Get().(chan struct{})
+func (p *waiterPool) Get() *waiter {
+	w := p.p.Get().(*waiter)
+	w.next = nil
+	return w
 }
 
-func (p *chanPool) Put(ch chan struct{}) {
-	p.p.Put(ch)
+// Put a waiter on the pool.
+//
+// Important that nothing has been queued on w.ch.
+func (p *waiterPool) Put(w *waiter) {
+	w.next = nil
+	p.p.Put(w)
 }
